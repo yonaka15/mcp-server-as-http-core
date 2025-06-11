@@ -1,0 +1,21 @@
+//! MCP Server as HTTP Core
+//! 
+//! This crate provides the core HTTP server functionality for exposing 
+//! Model Context Protocol (MCP) servers via REST API.
+
+pub mod auth;
+pub mod config;
+pub mod error;
+pub mod http;
+pub mod runtime;
+pub mod server;
+
+pub use error::{McpError, McpResult};
+pub use server::McpHttpServer;
+pub use runtime::{McpRuntime, McpProcess};
+pub use config::{McpConfig, ServerConfig, RuntimeConfig};
+pub use auth::AuthConfig;
+
+/// Re-export commonly used types
+pub use serde::{Deserialize, Serialize};
+pub use serde_json::{Value as JsonValue};
