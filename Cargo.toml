@@ -2,15 +2,11 @@
 name = "mcp-server-as-http-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core HTTP server for MCP (Model Context Protocol) servers"
+description = "Core HTTP server binary for MCP (Model Context Protocol) servers"
 license = "MIT"
 repository = "https://github.com/yonaka15/mcp-server-as-http-core"
 
-# Define both library and binary targets
-[lib]
-name = "mcp_server_as_http_core"
-path = "src/lib.rs"
-
+# Binary-only configuration (no library)
 [[bin]]
 name = "mcp-server-as-http-core"
 path = "src/main.rs"
@@ -25,3 +21,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+
+# Optimize for binary size and performance
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
