@@ -10,7 +10,6 @@ use crate::{
     config::{AuthConfig, McpServersConfig},
     error::{McpCoreError, McpCoreResult},
     process::{McpProcess, McpRequest, McpResponse},
-    runtime::{create_runtime},
 };
 
 /// HTTP server state containing the MCP process
@@ -30,40 +29,20 @@ impl McpHttpServer {
     pub async fn new(
         config_file_path: &str,
         server_name: &str,
-        runtime_type: &str,
     ) -> McpCoreResult<Self> {
         tracing::info!("Initializing MCP HTTP server...");
         tracing::info!(
-            "Config file: '{}', Server: '{}', Runtime: '{}'",
+            "Config file: '{}', Server: '{}'",
             config_file_path,
-            server_name,
-            runtime_type
+            server_name
         );
 
         // Load configuration
         let servers_config = McpServersConfig::load_from_file(config_file_path).await?;
         let server_config = servers_config.get_server(server_name)?.clone();
 
-        // Create runtime
-        let runtime = create_runtime(runtime_type)?;
-
-        // Setup environment
-        runtime
-            .setup_environment(&server_config.runtime_config)
-            .await?;
-
-        // Setup repository and get working directory
-        let work_dir = "/tmp/mcp-servers";
-        tokio::fs::create_dir_all(work_dir)
-            .await
-            .map_err(|e| McpCoreError::RuntimeError {
-                message: format!("Failed to create work directory: {}", e),
-            })?;
-
-        let working_dir = runtime.setup_repository(&server_config, work_dir).await?;
-
-        // Start MCP server process
-        let mcp_process = runtime.start_server(&server_config, &working_dir).await?;
+        // Start MCP server process directly
+        let mcp_process = Self::start_mcp_process(&server_config).await?;
 
         // Create auth config
         let auth_config = AuthConfig::from_env();
@@ -76,6 +55,38 @@ impl McpHttpServer {
                 mcp_process: Arc::new(Mutex::new(mcp_process)),
             },
         })
+    }
+
+    /// Start MCP server process directly
+    async fn start_mcp_process(config: &crate::config::McpServerConfig) -> McpCoreResult<McpProcess> {
+        tracing::info!(
+            "Starting MCP server: {} {:?}",
+            config.command,
+            config.args
+        );
+
+        let mut command_builder = tokio::process::Command::new(&config.command);
+        command_builder.args(&config.args);
+        command_builder.envs(&config.env);
+
+        // Inherit parent environment variables
+        for (key, value) in std::env::vars() {
+            command_builder.env(key, value);
+        }
+
+        // Set working directory
+        let work_dir = "/tmp/mcp-servers";
+        tokio::fs::create_dir_all(work_dir).await.map_err(|e| McpCoreError::ProcessError {
+            message: format!("Failed to create work directory: {}", e),
+        })?;
+        command_builder.current_dir(work_dir);
+        
+        command_builder
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        McpProcess::spawn(command_builder).await
     }
 
     /// Create the Axum router

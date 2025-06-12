@@ -8,7 +8,6 @@ pub mod config;
 pub mod error;
 pub mod http_server;
 pub mod process;
-pub mod runtime;
 
 use crate::error::McpCoreResult;
 use crate::http_server::McpHttpServer;
@@ -31,22 +30,20 @@ async fn main() -> McpCoreResult<()> {
     let config_file =
         env::var("MCP_CONFIG_FILE").unwrap_or_else(|_| "mcp_servers.config.json".to_string());
     let server_name = env::var("MCP_SERVER_NAME").unwrap_or_else(|_| "redmine".to_string());
-    let runtime_type = env::var("MCP_RUNTIME_TYPE").unwrap_or_else(|_| "node".to_string());
     let port = env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())
         .parse::<u16>()
         .unwrap_or(3000);
 
     tracing::info!(
-        "Configuration - Config: {}, Server: {}, Runtime: {}, Port: {}",
+        "Configuration - Config: {}, Server: {}, Port: {}",
         config_file,
         server_name,
-        runtime_type,
         port
     );
 
     // Create and start the MCP HTTP server
-    let server = McpHttpServer::new(&config_file, &server_name, &runtime_type).await?;
+    let server = McpHttpServer::new(&config_file, &server_name).await?;
 
     tracing::info!("MCP HTTP Core server ready to accept connections");
 
