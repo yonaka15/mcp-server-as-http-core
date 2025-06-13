@@ -6,50 +6,26 @@
       "build_command": "npm install && npm run build",
       "command": "node",
       "args": ["dist/index.js"],
-      "env": {},
-      "runtime_config": {
-        "node": {
-          "version": ">=18.0.0",
-          "package_manager": "npm"
-        }
-      }
+      "env": {}
     },
     "brave-search": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-      "env": {},
-      "runtime_config": {
-        "node": {
-          "version": ">=18.0.0",
-          "package_manager": "npm"
-        }
-      }
+      "env": {}
     },
     "example-python": {
       "repository": "https://github.com/example/mcp-server-python",
       "build_command": "pip install -r requirements.txt",
       "command": "python3",
       "args": ["main.py"],
-      "env": {},
-      "runtime_config": {
-        "python": {
-          "version": ">=3.8",
-          "requirements_file": "requirements.txt"
-        }
-      }
+      "env": {}
     },
     "example-go": {
       "repository": "https://github.com/example/mcp-server-go",
       "build_command": "go build -o mcp-server .",
       "command": "./mcp-server",
       "args": [],
-      "env": {},
-      "runtime_config": {
-        "go": {
-          "version": ">=1.21",
-          "module_path": "."
-        }
-      }
+      "env": {}
     }
   }
 }
