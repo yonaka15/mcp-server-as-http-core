@@ -51,12 +51,6 @@ Create `mcp_servers.config.json`:
       "args": ["dist/index.js"],
       "env": {
         "CUSTOM_VAR": "value"
-      },
-      "runtime_config": {
-        "node": {
-          "version": ">=18.0.0",
-          "package_manager": "npm"
-        }
       }
     }
   }
