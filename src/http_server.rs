@@ -57,13 +57,25 @@ impl McpHttpServer {
         })
     }
 
-    /// Start MCP server process directly
+    /// Start MCP server process with optional build command execution
     async fn start_mcp_process(config: &crate::config::McpServerConfig) -> McpCoreResult<McpProcess> {
         tracing::info!(
             "Starting MCP server: {} {:?}",
             config.command,
             config.args
         );
+
+        // Set working directory
+        let work_dir = "/tmp/mcp-servers";
+        tokio::fs::create_dir_all(work_dir).await.map_err(|e| McpCoreError::ProcessError {
+            message: format!("Failed to create work directory: {}", e),
+        })?;
+
+        // Execute build command if present
+        if let Some(build_cmd) = &config.build_command {
+            tracing::info!("Executing build command: {}", build_cmd);
+            Self::execute_build_command(build_cmd, work_dir, &config.env).await?;
+        }
 
         let mut command_builder = tokio::process::Command::new(&config.command);
         command_builder.args(&config.args);
@@ -74,11 +86,6 @@ impl McpHttpServer {
             command_builder.env(key, value);
         }
 
-        // Set working directory
-        let work_dir = "/tmp/mcp-servers";
-        tokio::fs::create_dir_all(work_dir).await.map_err(|e| McpCoreError::ProcessError {
-            message: format!("Failed to create work directory: {}", e),
-        })?;
         command_builder.current_dir(work_dir);
         
         command_builder
@@ -87,6 +94,89 @@ impl McpHttpServer {
             .stderr(std::process::Stdio::piped());
 
         McpProcess::spawn(command_builder).await
+    }
+
+    /// Execute build command in the specified working directory
+    async fn execute_build_command(
+        build_cmd: &str,
+        work_dir: &str,
+        env_vars: &std::collections::HashMap<String, String>,
+    ) -> McpCoreResult<()> {
+        tracing::info!("Starting build process: {}", build_cmd);
+        
+        // Parse the build command (handle shell commands with &&, ||, etc.)
+        let mut command_builder = if cfg!(target_os = "windows") {
+            let mut cmd = tokio::process::Command::new("cmd");
+            cmd.args(["/C", build_cmd]);
+            cmd
+        } else {
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.args(["-c", build_cmd]);
+            cmd
+        };
+
+        // Set environment variables
+        command_builder.envs(env_vars);
+        
+        // Inherit parent environment variables
+        for (key, value) in std::env::vars() {
+            command_builder.env(key, value);
+        }
+        
+        // Set working directory
+        command_builder.current_dir(work_dir);
+        
+        // Capture output for logging
+        command_builder
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        tracing::debug!("Executing build command in directory: {}", work_dir);
+        
+        let start_time = std::time::Instant::now();
+        let output = command_builder
+            .output()
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to execute build command '{}': {}", build_cmd, e),
+            })?;
+
+        let duration = start_time.elapsed();
+        
+        // Log the output
+        if !output.stdout.is_empty() {
+            let stdout_str = String::from_utf8_lossy(&output.stdout);
+            tracing::info!("Build stdout: {}", stdout_str.trim());
+        }
+        
+        if !output.stderr.is_empty() {
+            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            if output.status.success() {
+                tracing::info!("Build stderr: {}", stderr_str.trim());
+            } else {
+                tracing::error!("Build stderr: {}", stderr_str.trim());
+            }
+        }
+        
+        // Check if the command was successful
+        if output.status.success() {
+            tracing::info!(
+                "Build command completed successfully in {:?}: {}",
+                duration,
+                build_cmd
+            );
+            Ok(())
+        } else {
+            let error_msg = format!(
+                "Build command failed with exit code {:?}: {}",
+                output.status.code(),
+                build_cmd
+            );
+            tracing::error!("{}", error_msg);
+            Err(McpCoreError::ProcessError {
+                message: error_msg,
+            })
+        }
     }
 
     /// Create the Axum router
