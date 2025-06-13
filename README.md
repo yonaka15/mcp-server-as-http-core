@@ -30,7 +30,6 @@ This core library provides:
 # Set environment variables
 export MCP_CONFIG_FILE=mcp_servers.config.json
 export MCP_SERVER_NAME=your-server
-export MCP_RUNTIME_TYPE=node
 export PORT=3000
 
 # Run the server
@@ -70,7 +69,6 @@ Create `mcp_servers.config.json`:
 - `DISABLE_AUTH`: Set to "true" to disable authentication
 - `MCP_CONFIG_FILE`: Path to configuration file (default: "mcp_servers.config.json")
 - `MCP_SERVER_NAME`: Server name from config to use
-- `MCP_RUNTIME_TYPE`: Runtime type (node, python, go)
 - `PORT`: HTTP server port (default: 3000)
 - `RUST_LOG`: Log level configuration
 
