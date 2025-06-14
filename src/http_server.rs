@@ -42,7 +42,7 @@ impl McpHttpServer {
         let server_config = servers_config.get_server(server_name)?.clone();
 
         // Start MCP server process directly
-        let mcp_process = Self::start_mcp_process(&server_config).await?;
+        let mcp_process = Self::start_mcp_process(&server_config, server_name).await?;
 
         // Create auth config
         let auth_config = AuthConfig::from_env();
@@ -57,24 +57,33 @@ impl McpHttpServer {
         })
     }
 
-    /// Start MCP server process with optional build command execution
-    async fn start_mcp_process(config: &crate::config::McpServerConfig) -> McpCoreResult<McpProcess> {
+    /// Start MCP server process with optional repository clone and build command execution
+    async fn start_mcp_process(
+        config: &crate::config::McpServerConfig,
+        server_name: &str,
+    ) -> McpCoreResult<McpProcess> {
         tracing::info!(
-            "Starting MCP server: {} {:?}",
+            "Starting MCP server '{}': {} {:?}",
+            server_name,
             config.command,
             config.args
         );
 
-        // Set working directory
-        let work_dir = "/tmp/mcp-servers";
-        tokio::fs::create_dir_all(work_dir).await.map_err(|e| McpCoreError::ProcessError {
-            message: format!("Failed to create work directory: {}", e),
+        // Get server-specific working directory
+        let work_dir = Self::get_server_work_dir(server_name);
+        tokio::fs::create_dir_all(&work_dir).await.map_err(|e| McpCoreError::ProcessError {
+            message: format!("Failed to create work directory '{}': {}", work_dir, e),
         })?;
+
+        // Clone repository if specified and not already exists
+        if let Some(repository_url) = &config.repository {
+            Self::clone_repository_if_needed(repository_url, &work_dir).await?;
+        }
 
         // Execute build command if present
         if let Some(build_cmd) = &config.build_command {
             tracing::info!("Executing build command: {}", build_cmd);
-            Self::execute_build_command(build_cmd, work_dir, &config.env).await?;
+            Self::execute_build_command(build_cmd, &work_dir, &config.env).await?;
         }
 
         let mut command_builder = tokio::process::Command::new(&config.command);
@@ -86,7 +95,7 @@ impl McpHttpServer {
             command_builder.env(key, value);
         }
 
-        command_builder.current_dir(work_dir);
+        command_builder.current_dir(&work_dir);
         
         command_builder
             .stdin(std::process::Stdio::piped())
@@ -94,6 +103,86 @@ impl McpHttpServer {
             .stderr(std::process::Stdio::piped());
 
         McpProcess::spawn(command_builder).await
+    }
+
+    /// Get server-specific working directory path
+    fn get_server_work_dir(server_name: &str) -> String {
+        format!("/tmp/mcp-servers/{}", server_name)
+    }
+
+    /// Clone repository if it doesn't already exist
+    async fn clone_repository_if_needed(
+        repository_url: &str,
+        work_dir: &str,
+    ) -> McpCoreResult<()> {
+        tracing::info!("Checking repository: {}", repository_url);
+
+        // Check if directory already contains a git repository
+        let git_dir = format!("{}/.git", work_dir);
+        if tokio::fs::metadata(&git_dir).await.is_ok() {
+            tracing::info!("Repository already exists in '{}', skipping clone", work_dir);
+            return Ok(());
+        }
+
+        tracing::info!("Cloning repository '{}' to '{}'", repository_url, work_dir);
+
+        let start_time = std::time::Instant::now();
+        
+        // Use git clone command
+        let mut command_builder = tokio::process::Command::new("git");
+        command_builder.args(["clone", repository_url, "."]);
+        command_builder.current_dir(work_dir);
+        
+        // Capture output for logging
+        command_builder
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        tracing::debug!("Executing: git clone {} .", repository_url);
+
+        let output = command_builder
+            .output()
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to execute git clone: {}", e),
+            })?;
+
+        let duration = start_time.elapsed();
+
+        // Log the output
+        if !output.stdout.is_empty() {
+            let stdout_str = String::from_utf8_lossy(&output.stdout);
+            tracing::debug!("Git clone stdout: {}", stdout_str.trim());
+        }
+
+        if !output.stderr.is_empty() {
+            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            if output.status.success() {
+                tracing::debug!("Git clone stderr: {}", stderr_str.trim());
+            } else {
+                tracing::error!("Git clone stderr: {}", stderr_str.trim());
+            }
+        }
+
+        // Check if the command was successful
+        if output.status.success() {
+            tracing::info!(
+                "Repository cloned successfully in {:?}: {}",
+                duration,
+                repository_url
+            );
+            Ok(())
+        } else {
+            let error_msg = format!(
+                "Git clone failed with exit code {:?}: {}",
+                output.status.code(),
+                repository_url
+            );
+            tracing::error!("{}", error_msg);
+            Err(McpCoreError::ProcessError {
+                message: error_msg,
+            })
+        }
     }
 
     /// Execute build command in the specified working directory

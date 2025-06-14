@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "servers": {
+    "redmine": {
+      "repository": "https://github.com/yonaka15/mcp-server-redmine",
+      "build_command": "npm install && npm run build",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {}
+    }
+  }
+}
