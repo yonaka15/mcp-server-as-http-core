@@ -1,5 +1,11 @@
-//! Process communication module for MCP servers
+// Path: src/process.rs
+// Compare this snippet from src/process.rs:
+//         // Read response with timeout
+//         let response_result = timeout(Duration::from_secs(30), async {
+//             let mut response_line = String::new();
+//             match self.stdout.read_line(&mut response_line).await {
 
+// This is the MCP server process wrapper
 use crate::error::{McpCoreError, McpCoreResult};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -109,7 +115,8 @@ impl McpProcess {
 
         // Write to MCP server stdin
         self.stdin
-            .write_all((mcp_message.to_string() + "\n").as_bytes())
+            .write_all((mcp_message.to_string() + "
+").as_bytes())
             .await
             .map_err(|e| McpCoreError::ProcessError {
                 message: format!("Failed to write to MCP stdin: {}", e),
@@ -125,7 +132,7 @@ impl McpProcess {
         tracing::debug!("Data sent to MCP server, waiting for response...");
 
         // Read response with timeout
-        let response_result = timeout(Duration::from_secs(30), async {
+        let response_result = timeout(Duration::from_secs(3600), async {
             let mut response_line = String::new();
             match self.stdout.read_line(&mut response_line).await {
                 Ok(0) => {
@@ -166,9 +173,9 @@ impl McpProcess {
                 result
             }
             Err(_) => {
-                tracing::debug!("MCP query timed out after 30 seconds");
+                tracing::debug!("MCP query timed out after 3600 seconds");
                 Err(McpCoreError::ProcessError {
-                    message: "MCP server response timeout (30 seconds)".to_string(),
+                    message: "MCP server response timeout (3600 seconds)".to_string(),
                 })
             }
         }
