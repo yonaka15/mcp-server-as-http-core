@@ -26,6 +26,25 @@ This core library provides:
 
 ### Basic Usage
 
+#### Option 1: Using .env file (Recommended)
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env file with your configuration
+# Uncomment and set the values you need:
+# HTTP_API_KEY=your-secret-api-key-here
+# MCP_CONFIG_FILE=mcp_servers.config.json
+# MCP_SERVER_NAME=your-server
+# PORT=3000
+
+# Run the server
+cargo run
+```
+
+#### Option 2: Using environment variables directly
+
 ```bash
 # Set environment variables
 export MCP_CONFIG_FILE=mcp_servers.config.json
@@ -59,12 +78,23 @@ Create `mcp_servers.config.json`:
 
 ### Environment Variables
 
+The server can be configured using environment variables. For convenience, you can use a `.env` file:
+
+```bash
+# Copy the example file and customize it
+cp .env.example .env
+```
+
+Available environment variables:
+
 - `HTTP_API_KEY`: Bearer token for authentication (optional)
-- `DISABLE_AUTH`: Set to "true" to disable authentication
+- `DISABLE_AUTH`: Set to "true" to disable authentication (default: "false")
 - `MCP_CONFIG_FILE`: Path to configuration file (default: "mcp_servers.config.json")
-- `MCP_SERVER_NAME`: Server name from config to use
+- `MCP_SERVER_NAME`: Server name from config to use (default: "redmine")
 - `PORT`: HTTP server port (default: 3000)
-- `RUST_LOG`: Log level configuration
+- `RUST_LOG`: Log level configuration (default: "mcp_server_as_http_core=debug")
+
+**Note**: Environment variables set directly in the shell will override values in the `.env` file.
 
 ## API Usage
 
