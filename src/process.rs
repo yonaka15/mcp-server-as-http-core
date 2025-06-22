@@ -89,20 +89,27 @@ impl McpProcess {
         })
     }
 
-    /// Initialize MCP connection with handshake
+    /// Initialize MCP connection with handshake according to official specification
     pub async fn initialize(&mut self) -> McpCoreResult<()> {
         tracing::info!("Initializing MCP connection...");
         
-        // Send initialize request
+        // Send initialize request with proper capabilities structure per MCP specification
         let init_request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "init",
             "method": "initialize",
             "params": {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {},
+                "capabilities": {
+                    // Client capabilities - properly structured
+                    "roots": {
+                        "listChanged": false
+                    },
+                    "sampling": {}
+                },
                 "clientInfo": {
                     "name": "mcp-http-core",
+                    "title": "MCP HTTP Core",
                     "version": "0.1.0"
                 }
             }
@@ -130,7 +137,36 @@ impl McpProcess {
         let init_response = self.read_response_with_timeout(Duration::from_secs(30)).await?;
         tracing::debug!("Initialize response: {}", init_response);
         
-        // Send initialized notification
+        // Parse and validate the response
+        match serde_json::from_str::<serde_json::Value>(&init_response) {
+            Ok(response) => {
+                if let Some(error) = response.get("error") {
+                    return Err(McpCoreError::ProcessError {
+                        message: format!("MCP initialization error: {}", error),
+                    });
+                }
+                
+                if let Some(result) = response.get("result") {
+                    if let Some(protocol_version) = result.get("protocolVersion") {
+                        tracing::info!("Server protocol version: {}", protocol_version);
+                    }
+                    if let Some(capabilities) = result.get("capabilities") {
+                        tracing::info!("Server capabilities: {}", capabilities);
+                    }
+                    if let Some(server_info) = result.get("serverInfo") {
+                        tracing::info!("Server info: {}", server_info);
+                    }
+                } else {
+                    tracing::warn!("Initialize response missing 'result' field");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to parse initialize response as JSON: {}", e);
+                // Continue anyway - some servers might send non-JSON responses
+            }
+        }
+        
+        // Send initialized notification per MCP specification
         let initialized_notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
