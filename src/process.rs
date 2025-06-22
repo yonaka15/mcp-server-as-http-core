@@ -1,13 +1,7 @@
-// Path: src/process.rs
-// Compare this snippet from src/process.rs:
-//         // Read response with timeout
-//         let response_result = timeout(Duration::from_secs(30), async {
-//             let mut response_line = String::new();
-//             match self.stdout.read_line(&mut response_line).await {
-
 // This is the MCP server process wrapper
 use crate::error::{McpCoreError, McpCoreResult};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::time::Instant;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -95,48 +89,82 @@ impl McpProcess {
         })
     }
 
-    /// Send a query to the MCP server and wait for response
-    pub async fn query(&mut self, request: &McpRequest) -> McpCoreResult<McpResponse> {
-        let start_time = Instant::now();
-        tracing::debug!("Starting MCP query");
-        tracing::debug!("Request: {:?}", request);
-
-        // Serialize the request
-        let request_json =
-            serde_json::to_string(request).map_err(|e| McpCoreError::ProcessError {
-                message: format!("Failed to serialize request: {}", e),
-            })?;
-
-        tracing::debug!("Serialized request: {}", request_json);
-
-        // Send the command to MCP server (the command field contains the JSON-RPC message)
-        let mcp_message = &request.command;
-        tracing::debug!("Sending to MCP server: {}", mcp_message);
-
-        // Write to MCP server stdin
+    /// Initialize MCP connection with handshake
+    pub async fn initialize(&mut self) -> McpCoreResult<()> {
+        tracing::info!("Initializing MCP connection...");
+        
+        // Send initialize request
+        let init_request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "mcp-http-core",
+                    "version": "0.1.0"
+                }
+            }
+        });
+        
+        let init_message = init_request.to_string();
+        tracing::debug!("Sending initialize request: {}", init_message);
+        
+        // Send initialize
         self.stdin
-            .write_all((mcp_message.to_string() + "
-").as_bytes())
+            .write_all((init_message + "\n").as_bytes())
             .await
             .map_err(|e| McpCoreError::ProcessError {
-                message: format!("Failed to write to MCP stdin: {}", e),
+                message: format!("Failed to write initialize request: {}", e),
             })?;
-
+            
         self.stdin
             .flush()
             .await
             .map_err(|e| McpCoreError::ProcessError {
-                message: format!("Failed to flush MCP stdin: {}", e),
+                message: format!("Failed to flush initialize request: {}", e),
             })?;
-
-        tracing::debug!("Data sent to MCP server, waiting for response...");
-
-        // Read response with timeout
-        let response_result = timeout(Duration::from_secs(3600), async {
+            
+        // Wait for initialize response
+        let init_response = self.read_response_with_timeout(Duration::from_secs(30)).await?;
+        tracing::debug!("Initialize response: {}", init_response);
+        
+        // Send initialized notification
+        let initialized_notification = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        });
+        
+        let notification_message = initialized_notification.to_string();
+        tracing::debug!("Sending initialized notification: {}", notification_message);
+        
+        self.stdin
+            .write_all((notification_message + "\n").as_bytes())
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to write initialized notification: {}", e),
+            })?;
+            
+        self.stdin
+            .flush()
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to flush initialized notification: {}", e),
+            })?;
+            
+        tracing::info!("MCP connection initialized successfully");
+        Ok(())
+    }
+    
+    /// Read a single response from MCP server with timeout
+    async fn read_response_with_timeout(&mut self, timeout_duration: Duration) -> McpCoreResult<String> {
+        let response_result = timeout(timeout_duration, async {
             let mut response_line = String::new();
             match self.stdout.read_line(&mut response_line).await {
                 Ok(0) => {
-                    tracing::debug!("MCP server closed connection (EOF)");
+                    tracing::warn!("MCP server closed connection (EOF)");
                     Err(McpCoreError::ProcessError {
                         message: "MCP server closed the connection (EOF)".to_string(),
                     })
@@ -151,13 +179,10 @@ impl McpProcess {
                         });
                     }
 
-                    // Return response as string (don't re-serialize as JSON)
-                    Ok(McpResponse {
-                        result: response_line.trim().to_string(),
-                    })
+                    Ok(response_line.trim().to_string())
                 }
                 Err(e) => {
-                    tracing::debug!("Error reading from MCP stdout: {}", e);
+                    tracing::error!("Error reading from MCP stdout: {}", e);
                     Err(McpCoreError::ProcessError {
                         message: format!("Failed to read from MCP stdout: {}", e),
                     })
@@ -167,18 +192,53 @@ impl McpProcess {
         .await;
 
         match response_result {
-            Ok(result) => {
-                let elapsed = start_time.elapsed();
-                tracing::debug!("MCP query completed in {:?}", elapsed);
-                result
-            }
+            Ok(result) => result,
             Err(_) => {
-                tracing::debug!("MCP query timed out after 3600 seconds");
+                let timeout_secs = timeout_duration.as_secs();
+                tracing::error!("MCP server response timeout after {} seconds", timeout_secs);
                 Err(McpCoreError::ProcessError {
-                    message: "MCP server response timeout (3600 seconds)".to_string(),
+                    message: format!("MCP server response timeout ({} seconds)", timeout_secs),
                 })
             }
         }
+    }
+
+    /// Send a query to the MCP server and wait for response
+    pub async fn query(&mut self, request: &McpRequest) -> McpCoreResult<McpResponse> {
+        let start_time = Instant::now();
+        tracing::debug!("Starting MCP query");
+        tracing::debug!("Request: {:?}", request);
+
+        // Send the command to MCP server (the command field contains the JSON-RPC message)
+        let mcp_message = &request.command;
+        tracing::debug!("Sending to MCP server: {}", mcp_message);
+
+        // Write to MCP server stdin
+        self.stdin
+            .write_all((mcp_message.to_string() + "\n").as_bytes())
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to write to MCP stdin: {}", e),
+            })?;
+
+        self.stdin
+            .flush()
+            .await
+            .map_err(|e| McpCoreError::ProcessError {
+                message: format!("Failed to flush MCP stdin: {}", e),
+            })?;
+
+        tracing::debug!("Data sent to MCP server, waiting for response...");
+
+        // Read response with shorter timeout for regular queries
+        let response_line = self.read_response_with_timeout(Duration::from_secs(30)).await?;
+        
+        let elapsed = start_time.elapsed();
+        tracing::debug!("MCP query completed in {:?}", elapsed);
+        
+        Ok(McpResponse {
+            result: response_line,
+        })
     }
 }
 
