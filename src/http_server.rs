@@ -102,7 +102,12 @@ impl McpHttpServer {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        McpProcess::spawn(command_builder).await
+        let mut mcp_process = McpProcess::spawn(command_builder).await?;
+        
+        // Initialize MCP connection
+        mcp_process.initialize().await?;
+        
+        Ok(mcp_process)
     }
 
     /// Get server-specific working directory path
