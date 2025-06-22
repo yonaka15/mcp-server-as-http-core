@@ -16,6 +16,13 @@ use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> McpCoreResult<()> {
+    // Load environment variables from .env file if present
+    // This will not override existing environment variables
+    if let Err(e) = dotenvy::dotenv() {
+        // It's okay if .env file doesn't exist
+        tracing::debug!("No .env file found or error loading it: {}", e);
+    }
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
